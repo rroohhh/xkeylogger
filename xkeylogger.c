@@ -38,11 +38,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 static char * NO_TITLE         = "(no title)";
 static char * NO_ACTIVE_WINDOW = "(no active window)";
+static FILE * output;
+static int    KEY_PRESS_TYPE   = -1;
+static int    KEY_RELEASE_TYPE = -1;
 
 struct keystroke_info {
     struct timespec timestamp;
     unsigned int    original_keycode;
     KeySym          original_keysym;
+    int             type;
     unsigned int    modifier_mask;
     int             translation_available;
     KeySym          translated_keysym;
@@ -52,14 +56,22 @@ struct keystroke_info {
 };
 
 static void process_event(const struct keystroke_info * info) {
-    printf("%s:%ld.%ld:", info->focused_window_name, info->timestamp.tv_sec,
-           info->timestamp.tv_nsec);
+    char * type = "invalid";
+
+    if (info->type == KEY_PRESS_TYPE) {
+        type = "press";
+    } else if (info->type == KEY_RELEASE_TYPE) {
+        type = "release";
+    }
+
+    fprintf(output, "%s:%ld.%ld:%s:", info->focused_window_name, info->timestamp.tv_sec,
+            info->timestamp.tv_nsec, type);
 
     switch(info->original_keysym) {
     /* avoid ambiguity of newline */
     case XK_Return:
     case XK_KP_Enter:
-        printf("<!{Return}!>");
+        fprintf(output, "<!{Return}!>");
         break;
     default:
         /* use default translation skipping control characters that are not
@@ -69,16 +81,16 @@ static void process_event(const struct keystroke_info * info) {
            !(info->modifier_mask & Mod1Mask) &&
            !(info->modifier_mask & Mod4Mask) &&
            info->original_keysym != XK_Escape) {
-            printf("%s", info->translated_char);
+            fprintf(output, "%s", info->translated_char);
         } /* use the "internal" x name */
         else {
-            printf("<!{%s}!>", XKeysymToString(info->translated_keysym));
+            fprintf(output, "<!{%s}!>", XKeysymToString(info->translated_keysym));
         };
     }
 
-    printf("\n");
+    fprintf(output, "\n");
 
-    fflush(stdout);
+    fflush(output);
 }
 
 static void register_events(Display * display, Window root) {
@@ -93,13 +105,13 @@ static void register_events(Display * display, Window root) {
            know the device id of the real one */
         if(devices[i].use == IsXExtensionKeyboard) {
             XDevice *   device;
-            int         KEY_PRESS_TYPE;
-            XEventClass event_class;
+            XEventClass event_class[2];
 
             /* open device and register the event */
             device = XOpenDevice(display, devices[i].id);
-            DeviceKeyPress(device, KEY_PRESS_TYPE, event_class);
-            XSelectExtensionEvent(display, root, &event_class, 1);
+            DeviceKeyPress(device, KEY_PRESS_TYPE, event_class[0]);
+            DeviceKeyRelease(device, KEY_RELEASE_TYPE, event_class[1]);
+            XSelectExtensionEvent(display, root, event_class, 2);
         }
     }
 
@@ -221,6 +233,12 @@ int main(int argc, char * argv[]) {
     Window    root;
     XIC       xic;
 
+    if (argc == 2) {
+        output = fopen(argv[1], "a");
+    } else {
+        output = stdout;
+    }
+
     /* open display */
     if(display = XOpenDisplay(NULL), !display) {
         fprintf(stderr, "Cannot open display\n");
@@ -249,6 +267,7 @@ int main(int argc, char * argv[]) {
         /* fill keystroke info */
         device_event = (XDeviceKeyEvent *)&event;
         clock_gettime(CLOCK_REALTIME, &info.timestamp); // = time( NULL );
+        info.type = device_event->type;
         info.original_keycode = device_event->keycode;
         info.original_keysym =
             XkbKeycodeToKeysym(display, device_event->keycode, 0, 0);

@@ -1,6 +1,6 @@
 .PHONY: dynamic static clean
 
-CFLAGS = -Wall -pedantic -O3 -Os
+CFLAGS = -Wall -Wextra -pedantic -O3
 LDFLAGS = -s
 
 dynamic: LDLIBS += -lX11 -lXi
